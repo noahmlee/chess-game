@@ -1,4 +1,4 @@
-import { Color, FENChar } from './models';
+import { Color, Coords, FENChar, SafeSquares } from './models';
 import { Bishop } from './pieces/bishop';
 import { King } from './pieces/king';
 import { Knight } from './pieces/knight';
@@ -11,6 +11,7 @@ export class ChessBoard {
   private chessBoard: (Piece | null)[][];
   private readonly chessBoardSize: number = 8;
   private _playerColor = Color.White;
+  private _safeSquares: SafeSquares;
 
   constructor() {
     this.chessBoard = [
@@ -59,6 +60,7 @@ export class ChessBoard {
         new Pawn(Color.Black),
       ],
     ];
+    this._safeSquares = this.findSafeSquares();
   }
 
   public get playerColor(): Color {
@@ -71,6 +73,10 @@ export class ChessBoard {
         piece instanceof Piece ? piece.FENChar : null
       );
     });
+  }
+
+  public get safeSquares(): SafeSquares {
+    return this._safeSquares;
   }
 
   public static isSquareDark(x: number, y: number): boolean {
@@ -106,12 +112,112 @@ export class ChessBoard {
               attackedPiece instanceof King &&
               attackedPiece.color === playerColor
             )
-              return false;
+              return true;
+          } else {
+            while (this.areCoordsValid(newX, newY)) {
+              const attackedPiece: Piece | null = this.chessBoard[newX][newY];
+              if (
+                attackedPiece instanceof King &&
+                attackedPiece.color === playerColor
+              )
+                return true;
+
+              if (attackedPiece !== null) break;
+
+              newX += dx;
+              newY += dy;
+            }
           }
         }
       }
     }
 
     return false;
+  }
+
+  isPositionSafeAfterMove(
+    piece: Piece,
+    prevX: number,
+    prevY: number,
+    newX: number,
+    newY: number
+  ): boolean {
+    const newPiece: Piece | null = this.chessBoard[newX][newY];
+    if (newPiece && newPiece.color === piece.color) return false;
+
+    this.chessBoard[prevX][prevY] = null;
+    this.chessBoard[newX][newY] = piece;
+
+    const isPositionSafe: boolean = !this.isInCheck(piece.color);
+
+    this.chessBoard[prevX][prevY] = piece;
+    this.chessBoard[newX][newY] = newPiece;
+
+    return isPositionSafe;
+  }
+
+  private findSafeSquares(): SafeSquares {
+    const safeSquares: SafeSquares = new Map<string, Coords[]>();
+
+    for (let x = 0; x < this.chessBoardSize; x++) {
+      for (let y = 0; y < this.chessBoardSize; y++) {
+        const piece: Piece | null = this.chessBoard[x][y];
+        if (!piece || piece.color !== this._playerColor) continue;
+
+        const pieceSafeSquares: Coords[] = [];
+
+        for (const { x: dx, y: dy } of piece.directions) {
+          let newX: number = x + dx;
+          let newY: number = y + dy;
+
+          if (!this.areCoordsValid(newX, newY)) continue;
+
+          let newPiece: Piece | null = this.chessBoard[newX][newY];
+          if (newPiece && newPiece.color === piece.color) continue;
+
+          if (piece instanceof Pawn) {
+            if (dx === 2 || dx === -2) {
+              if (newPiece) continue;
+              if (this.chessBoard[newX + (dx === 2 ? -1 : 1)][newY]) continue;
+            }
+
+            if ((dx === 1 || dx === -1) && dy === 0 && newPiece) continue;
+
+            if (
+              (dy === y || dy === -1) &&
+              (!newPiece || piece.color === newPiece.color)
+            )
+              continue;
+          }
+
+          if (
+            piece instanceof Pawn ||
+            piece instanceof Knight ||
+            piece instanceof King
+          ) {
+            if (this.isPositionSafeAfterMove(piece, x, y, newX, newY))
+              pieceSafeSquares.push({ x: newX, y: newY });
+          } else {
+            while (this.areCoordsValid(newX, newY)) {
+              newPiece = this.chessBoard[newX][newY];
+              if (newPiece && newPiece.color === piece.color) break;
+
+              if (this.isPositionSafeAfterMove(piece, x, y, newX, newY))
+                pieceSafeSquares.push({ x: newX, y: newY });
+
+              if (newPiece !== null) break;
+
+              newX += dx;
+              newY += dy;
+            }
+          }
+        }
+
+        if (pieceSafeSquares.length)
+          safeSquares.set(x + ',' + y, pieceSafeSquares);
+      }
+    }
+
+    return safeSquares;
   }
 }
